@@ -1,0 +1,713 @@
+---
+title: "Analysis"
+author: "Nate, Tristan, Tomas"
+date: "2025-10-10"
+output:
+  html_document: default
+  pdf_document: default
+bibliography: ../data/reference.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## I. Introduction
+
+Europe is generally considered as the most developed continent, while African consists of many emerging countries. What factors affect each region's economic growth and how have they performed over the past decades? To answer the question, the team looked at a widely recognized economic dataset, the Penn World Table (PWT).
+
+We are using Penn World Table (PWT) version 11.0, a major economic database maintained by the University of Groningen's Growth and Development Centre. Here are the details of what is included in the dataset:
+
+-   Coverage: 185 countries from 1950 to 2023
+-   Data Types: Information on relative levels of:
+    1.  Income and output
+    2.  Inputs and productivity
+    3.  GDP measures using different methodologies
+    4.  Capital stock, employment, and educational attainment ... and more
+
+We analyze recent global macroeconomic trends using Penn World Table data, focusing on Europe and Africa. Because earlier observations are sparse, we restrict the window to 2005–2023. Our analysis centers on real and PPP GDP, population, and GDP per capita to examine how income levels and population dynamics relate to output at the country and regional levels.
+
+We also looked at the relationship between GDP and human capital to examine the roles that the latter plays  in shaping European's and African's economic growth overall.
+
+### I.1 Dataset Key Variables
+
+PWT 11.0 from University of Groningen's Growth and Development Centre provides dozens of variables related to economic output, input, productivity, growth, etc (More details can be found [here](https://www.rug.nl/ggdc/productivity/pwt/)). In order to focus on the most relevant variables for our analysis, we selected the following key variables:
+
+-   **rgdpo**: Output-side real GDP at constant 2017 national prices (in millions USD)
+-   **cgdpo**: Output-side real GDP at current Purchasing Power Parities
+-   **pop**: Population (in millions)
+-   **GDP per capita**: Derived by dividing GDP by population, providing a measure of average economic output per person
+
+*Dataset Citation:* Feenstra, Robert C., Robert Inklaar and Marcel P. Timmer (2015), "The Next Generation of the Penn World Table" *American Economic Review*, 105(10), 3150-3182, available for download at www.ggdc.net/pwt. [@pwt]
+
+These variables highlight the overall economic growth of the regions and allow us to further explore the connection between each variable and GDP growth. 
+
+### I.2 Scope, Limitations, and Ethical Considerations
+
+The Penn World Table is a powerful resource for global economic analysis, however, we acknowledge potential limitations and ethical considerations. Earlier data, in particular for developing countries, could be biased or estimated given outdated data systems. GDP may not account for income inequality or overall well-being. Our analysis will focus on broad, macroeconomic trends.
+
+## II. Preparation for Analysis
+
+To ensure a meaningful analysis, we filtered PWT data to 2005–2023, then filtered and assigned countries to Africa and Europe, given the data does not include continent or region. We selected key variables (real GDP, PPP GDP, population, employment, human capital) and compute real GDP per capita and PPP-adjusted GDP per capita. We aggregated by region and year to calculate average GDP per capita and year-over-year growth to build country-level growth tables for ranking and plotting.
+
+### II.1 Libraries introduction
+
+In this project, we utilize several R packages to facilitate data manipulation, analysis, and visualization: *tidyverse, readxl, here, and scales*.
+
+The ***tidyverse*** is a collection of core packages (dplyr, tidyr, ggplot2, readr, purrr, tibble, etc.) that provide a consistent grammar for data manipulation, transformation and visualization. In this project we'll rely on it for reading-cleaning-filtering pipelines (dplyr verbs like filter, select, mutate), reshaping (tidyr), and plotting (ggplot2).
+
+***readxl*** gives fast, dependency-free tools to read Excel files into tibbles. We’ll use read_excel() to import the PWT workbook and specific sheets without converting to CSV first.
+
+***here*** constructs stable file paths relative to the project root instead of the current working directory. We will use here::here("data", "pwt110.xlsx") when reading or writing files so the code runs from different environments (RStudio/VS Code/CI) without brittle ../ paths. This makes RMarkdown and scripts portable across collaborators and CI pipelines.
+
+***scales*** contains helpers for formatting axis labels and legends in ggplot2 (e.g., comma, percent_format, dollar). In plotting steps we'll use scales::comma, scales::percent_format(), or scales::label_number_si() to make numeric axes human-readable and publication-ready. It’s a presentation-focused tool, not for changing raw data.
+
+***skimr*** provides a summary of the dataset, including the number of missing values, the distribution of the data, and the correlation between the variables.
+
+### II.2 Loading the packages and dataset
+
+We will be loading the following packages to assist with our data analysis and visualization:
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(readxl)
+library(here)
+library(scales)
+library(skimr)
+
+pwt_raw <- read_excel("../data/pwt110.xlsx", sheet = "Data")
+```
+
+**Dataset basic information**
+
+With the packages installed and dataset loaded, we will be examining its basic structure, including dimensions, time range, and number of countries represented.
+
+```{r}
+cat("Dataset dimensions:", nrow(pwt_raw), "rows x", ncol(pwt_raw), "columns\n")
+cat("Time range:", min(pwt_raw$year, na.rm = TRUE), "to", 
+    max(pwt_raw$year, na.rm = TRUE), "\n")
+cat("Number of countries:", length(unique(pwt_raw$country)), "\n\n")
+```
+
+> Output:
+>
+> Dataset dimensions: 13690 rows x 51 columns
+>
+> Time range: 1950 to 2023
+>
+> Number of countries: 185
+
+As output shows, the dataset contains 13690 rows and 51 columns, covering the period from 1950 to 2023, and includes data for 185 countries.
+
+### II.3 Grouping countries into regions
+
+Since the goal of this research project is to examine and compare the overall economic growth for African and European countries combined over the past two decades, we will filter and group the countries into regions, and to only include observations from 2005 to 2023.
+
+```{r}
+
+# Filtering the dataset to include only observations from 2005 to 2023
+pwt_filtered <- pwt_raw %>%
+  filter(year >= 2005 & year <= 2023)
+
+# Creating a list of African countries
+african_countries <- c(
+  "Algeria", "Angola", "Benin", "Botswana", "Burkina Faso", "Burundi",
+  "Cameroon", "Cape Verde", "Central African Republic", "Chad", "Comoros",
+  "Congo, Dem. Rep.", "Congo, Rep.", "Cote d'Ivoire", "Djibouti", "Egypt",
+  "Equatorial Guinea", "Eritrea", "Eswatini", "Ethiopia", "Gabon", "Gambia",
+  "Ghana", "Guinea", "Guinea-Bissau", "Kenya", "Lesotho", "Liberia", "Libya",
+  "Madagascar", "Malawi", "Mali", "Mauritania", "Mauritius", "Morocco",
+  "Mozambique", "Namibia", "Niger", "Nigeria", "Rwanda", "Sao Tome and Principe",
+  "Senegal", "Seychelles", "Sierra Leone", "Somalia", "South Africa", "South Sudan",
+  "Sudan", "Tanzania", "Togo", "Tunisia", "Uganda", "Zambia", "Zimbabwe"
+)
+
+# Creating a list of European countries
+european_countries <- c(
+  "Albania", "Austria", "Belgium", "Bosnia and Herzegovina", "Bulgaria",
+  "Croatia", "Cyprus", "Czech Republic", "Denmark", "Estonia", "Finland",
+  "France", "Germany", "Greece", "Hungary", "Iceland", "Ireland", "Italy",
+  "Kosovo", "Latvia", "Lithuania", "Luxembourg", "Malta", "Moldova",
+  "Montenegro", "Netherlands", "North Macedonia", "Norway", "Poland",
+  "Portugal", "Romania", "Russian Federation", "Serbia", "Slovakia", "Slovenia",
+  "Spain", "Sweden", "Switzerland", "Ukraine", "United Kingdom"
+)
+
+# Creating a new variable to categorize countries into Africa and Europe
+# Filtering the dataset to include only observations from Africa and Europe
+pwt_regions <- pwt_filtered %>%
+  mutate(
+    region = case_when(
+      country %in% african_countries ~ "Africa",
+      country %in% european_countries ~ "Europe",
+      TRUE ~ "Other"
+    )
+  ) %>%
+  filter(region %in% c("Africa", "Europe"))
+```
+
+By sorting the countries into **african_countries** and *european_countries*, we group all the countries into two regions. The final filtered dataset **pwt_regions** includes data from two regions across year 2005-2023.
+
+### II.4 Verifying the regions and countries included
+
+Before we proceed with the analysis, we will verify the countries that are being recorded in the dataset from Africa and Europe to ensure data completeness and accuracy.
+
+```{r}
+region_summary <- pwt_regions %>%
+  group_by(region) %>%
+  summarise(
+    n_countries = n_distinct(country),
+    n_observations = n()
+  )
+
+print("Countries by region:")
+print(region_summary)
+
+# Display which specific countries are included
+cat("\nAfrican countries in dataset:\n")
+print(sort(unique(pwt_regions$country[pwt_regions$region == "Africa"])))
+
+cat("\nEuropean countries in dataset:\n")
+print(sort(unique(pwt_regions$country[pwt_regions$region == "Europe"])))
+```
+
+As output shows, we have 47 African countries and 37 European countries represented in our filtered dataset. And the number of observations for each region is 893 for Africa and 703 for Europe, indicating a balanced dataset. This includes a diverse mix of countries from relatively developed to emerging to resource-rich economies.
+
+-   **Africa**: Ranges from relatively developed economies (South Africa, Morocco, Egypt) to emerging economies (Ethiopia, Rwanda, Ghana) to resource-rich nations (Nigeria, Angola, Gabon)
+-   **Europe**: Includes both established Western economies (Germany, France, UK) and post-Soviet transition economies (Ukraine, Russian Federation, Baltic states)
+
+### II.5 Selecting key variables
+
+Next, since our research mainly focus on macroeconomic growth and performance, we will select the key variables needed for our analysis, including real GDP, PPP GDP, population, employment, and human capital index.
+
+```{r}
+pwt_clean <- pwt_regions %>%
+  select(
+    countrycode,
+    country,
+    year,
+    region,
+    rgdpo,      # Real GDP (output-side)
+    cgdpo,      # Real GDP at current PPPs
+    pop,        # Population
+    emp,        # Employment (millions)
+    hc,          # Human capital index
+    cn          # Physical Capital (in millions USD)
+  )
+```
+
+The resulted **pwt_clean** dataset contains only the necessary variables for our analysis, making it more manageable and focused.
+
+### II.6 Missing Data Processing
+
+Before conducting any analysis, it is crucial to address any missing data in our selected key variables to ensure the completeness of the data. We will check for missing values in our key variables to ensure data integrity.
+
+```{r}
+skim(pwt_clean)
+```
+
+According to the results, we have a few missing values in all the key varaibles, but not a huge amount. There are only 3 missing values in *rgdpo*, *cgdpo*, *pop*, and *emp* in total, but 247 entries are missing in *hc*. We will next conduct a more detailed examination to find out the correct handling for these missing values.
+
+#### II.6.1 Missing values in *rgdpo*, *cgdpo*, *pop*, and *emp*
+
+To identify the specific countries and years with missing values in *rgdpo*, *cgdpo*, *pop*, and *emp*, we will filter the dataset accordingly.
+
+```{r}
+missing_gdp_pop <- pwt_clean %>%
+  filter(is.na(rgdpo) | is.na(cgdpo) | is.na(pop) | is.na(emp)) %>%
+  select(country, year, region, rgdpo, cgdpo, pop, emp)
+
+print(missing_gdp_pop)
+```
+
+As the details show, all the missing values for these four variables is actually from the same country, South Sudan. According to our research [@wikiarticle], South Sudan declared independence from Republic of Sudan in 2011, therefore, we believe that the missing data is due to the chaotic situation, both political and social, in the country. Therefore, we will remove all the data from South Sudan before 2008.
+
+#### II.6.2 Missing values in *hc* (Human capital index)
+
+Human capital is a crucial factor in economic development, thus we will investigate the missing values in the human capital index to determine the appropriate handling method. 
+
+```{r}
+# Countries with missing human capital data
+missing_hc <- pwt_clean %>%
+  filter(is.na(hc)) %>%
+  group_by(country, region) %>%
+  summarise(
+    years_missing = n(),
+    missing_years = paste(year, collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(years_missing))
+
+print(missing_hc)
+```
+
+There are 13 countries with completely no human capital data, an unexpected result as human capital is an important factor for economic development. Some of these countries are either severely underdeveloped or small islands such as Comoros, Sao Tome and Principe. We will retain the 13 countries for GDP analysis but exclude them from human capital analysis. Further research could be done to investigate precisely why these countries have no human capital data.
+
+#### II.6.3 Handling Missing Data
+
+Now that we have identified the sources of missing data, we will proceed to handle them accordingly to ensure the integrity of our dataset for analysis. 
+
+```{r}
+# Remove South Sudan's pre-2008 data (before data collection began)
+pwt_clean <- pwt_clean %>%
+  filter(!(country == "South Sudan" & year < 2008))
+
+# Identify countries with no hc data programmatically
+countries_no_hc <- pwt_clean %>%
+  group_by(country) %>%
+  summarise(hc_available = sum(!is.na(hc))) %>%
+  filter(hc_available == 0) %>%
+  pull(country)
+
+# Create a new dataset excluding countries with no hc data
+pwt_clean_no_hc <- pwt_clean %>%
+  filter(!(country %in% countries_no_hc)) %>%
+  mutate(
+    gdp_per_capita = rgdpo / pop,           # Real GDP per capita
+    gdp_per_capita_ppp = cgdpo / pop        # GDP per capita at PPP
+  )
+
+# Verify cleaning worked
+cat("\nData summary after cleaning:\n")
+cat("Total observations:", nrow(pwt_clean), "\n")
+cat("Remaining missing rgdpo/cgdpo/pop/emp:", 
+    sum(is.na(pwt_clean$rgdpo) | is.na(pwt_clean$cgdpo) | 
+        is.na(pwt_clean$pop) | is.na(pwt_clean$emp)), "\n")
+cat("Total observations:", nrow(pwt_clean_no_hc), "\n")
+cat("Remaining missing rgdpo/cgdpo/pop/emp:", 
+    sum(is.na(pwt_clean_no_hc$rgdpo) | is.na(pwt_clean_no_hc$cgdpo) | 
+        is.na(pwt_clean_no_hc$pop) | is.na(pwt_clean_no_hc$emp)), "\n")
+```
+
+The two final tables we will be using are ***pwt_clean*** and ***pwt_clean_no_hc***.
+
+For ***pwt_clean***, we have 1593 observations left in the dataset, with no missing values in the key variables. For ***pwt_clean_no_hc***, we have 1349 observations left in the dataset.
+
+## III. GDP Analysis
+
+Next, we will start our analysis with a comprehensive analysis of GDP trends in Africa and Europe from 2005 to 2023. This includes visualizing GDP distributions, examining GDP per capita trends, identifying fastest growing countries, and exploring the relationship between human capital and GDP growth.
+
+### III.1 Initial visualization: Boxplot of GDP by region over time
+
+Gross Domestic Product (GDP) is a crucial metric for assessing the economic output of a country or region, which is calculated by summing the value of all goods and services produced within a country's borders over a given period of time, often understood as a nation's productivity output. A high GDP value usually indicates strong economic performance and development.
+
+To better understand the distribution of GDP across Africa and Europe over the years, we will create a boxplot comparing real GDP (in millions USD) for both regions from 2005 to 2023.
+
+```{r}
+pwt_regions %>%
+  ggplot(aes(x = factor(year), y = rgdpe, fill = region)) +
+  geom_boxplot() +
+  labs(
+    title = "GDP Comparison: Africa vs Europe (2005-2023)",
+    x = "Year",
+    y = "Real GDP (in millions USD)",
+    fill = "Region"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  scale_y_log10(labels = scales::comma_format()) +
+  scale_fill_brewer(palette = "Set2")
+```
+
+Europe consistently shows significantly higher median GDP levels than Africa throughout, indicating a persistent gap in overall economic output between the two regions. The interquartile range (IQR) for Europe is also wider, reflecting greater variability among European economies — with some countries generating extremely high GDP levels while others remain closer to the lower quartile. In contrast, Africa’s GDP distribution is more compact, suggesting that most African economies cluster within a lower range of total output, though the upper quartile has shown gradual upward movement over time.
+
+Both regions exhibit gradual economic growth. The medians for both trended upward, though Europe’s increase is more stable. The whiskers — representing the range of GDPs — also expand slightly over time, especially for Africa, implying that some African countries are beginning to experience notable economic expansion. The gap between the two box sets underscores the disparity in economic size and development between the regions, with Europe maintaining a strong lead.
+
+### III.2 GDP vs. Population Analysis
+
+After visualizing the GDP distributions, we will next analyze GDP per capita trends in Africa and Europe from 2005 to 2023. GDP per capita is a key indicator of average economic output per person, providing insights into living standards and economic well-being.
+
+#### III.2.1 Calculating GDP per Capita
+
+*GDP per capita* is a crucial metric for assessing the average economic output per person in a country or region. We will calculate both real GDP per capita and GDP per capita at purchasing power parity (PPP) for each country-year observation in our cleaned dataset.
+
+```{r}
+pwt_clean <- pwt_clean %>%
+  mutate(
+    gdp_per_capita = rgdpo / pop,           # Real GDP per capita
+    gdp_per_capita_ppp = cgdpo / pop        # GDP per capita at PPP
+  )
+```
+
+#### III.2.2 Time Series Plot of Average GDP per Capita by Region
+
+Next, we will visualize the average GDP per capita and its cumulative growth. We separate these metrics into vertically aligned graphs, which allows us to clearly compare the absolute gap in wealth alongside the relative growth trajectories.
+
+```{r}
+# Create region_time_series first
+region_time_series <- pwt_clean %>%
+  group_by(region, year) %>%
+  summarise(
+    mean_gdp_pc = mean(gdp_per_capita, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(region %in% c("Africa", "Europe"), year >= 2005)
+
+# Create region_time_series_with_pct with percentage change from 2005
+region_time_series_with_pct <- region_time_series %>%
+  group_by(region) %>%
+  mutate(
+    pct_change_from_2005 = (mean_gdp_pc / first(mean_gdp_pc) - 1)
+  )
+
+# Reshape for small multiples
+region_metrics_long <- region_time_series_with_pct %>%
+  pivot_longer(
+    cols = c(mean_gdp_pc, pct_change_from_2005), 
+    names_to = "metric", 
+    values_to = "value"
+  ) %>%
+  mutate(
+    metric_label = case_when(
+      metric == "mean_gdp_pc" ~ "Average GDP per Capita ($)",
+      metric == "pct_change_from_2005" ~ "Cumulative Growth since 2005 (%)"
+    ),
+    # Set factor levels to control order (GDP first, then Growth)
+    metric_label = factor(metric_label, levels = c("Average GDP per Capita ($)", "Cumulative Growth since 2005 (%)"))
+  )
+
+ggplot(region_metrics_long, aes(x = year, y = value, color = region)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 2, alpha = 0.8) +
+  facet_wrap(~metric_label, scales = "free_y", ncol = 1) +
+  scale_y_continuous(labels = function(x) {
+    ifelse(x < 1, scales::percent(x), scales::comma(x))
+  }) +
+  labs(
+    title = "GDP per Capita and Cumulative Growth (2005–2023)",
+    subtitle = "Separating metrics reveals distinct patterns: a widening absolute gap vs. comparable relative growth",
+    x = "Year",
+    y = NULL,
+    color = "Region"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "top"
+  )
+```
+
+Overall, we are trying to explore the relationship between GDP per capita and its cumulative growth for both regions from 2005 to 2023. 
+
+The top graph shows the average GDP per capita for both regions, while the bottom graph shows the cumulative growth rate of GDP per capita in percentage.
+
+We can see that there is a considerable gap between Europe and Africa in average GDP per capita. The economic development of Europe is more stable and sustainable throughout this time period. This is not unexpected given Europe as a developed region (containing the UK, France, Germany, etc.), consistently achieves a high level of economic development, thus resulting in higher GDP per capita.
+
+Looking closer at percentage change, we see more nuance in the economic development of the two regions. There are a few "cross-over" points. From 2008 to 2016, Africa's GDP per capita growth rate is high, reaching nearly 30% compared to 15-20% for Europe. Africa experienced a period of rapid growth, though seemingly not sustainable. European percentage change is higher from 2016 onward. This could be due to the economic crisis of 2008, however establishing cause requires further investigation, which raises an interesting question: what are the structural factors preventing the conversion of growth spurts into sustained improvement for African countries?
+
+#### III.2.3 Year-over-Year Growth Calculation and Visualization
+
+We calculate the year-over-year (YoY) growth rates. To directly compare the performance of the two regions, we plot the **difference** in growth rates (Africa minus Europe). This method highlights when Africa was catching up to Europe (positive values, in brown) versus falling behind (negative values, in green).
+
+```{r}
+region_growth <- region_time_series %>%
+  group_by(region) %>%
+  arrange(year) %>%
+  mutate(
+    yoy_growth = (mean_gdp_pc / lag(mean_gdp_pc) - 1)
+  ) %>%
+  ungroup()
+
+# Calculate the difference: Africa Growth - Europe Growth
+growth_diff <- region_growth %>%
+  select(year, region, yoy_growth) %>%
+  pivot_wider(names_from = region, values_from = yoy_growth) %>%
+  mutate(diff_Africa_Europe = Africa - Europe) %>%
+  filter(!is.na(diff_Africa_Europe))
+
+# Plot the difference
+ggplot(growth_diff, aes(x = year, y = diff_Africa_Europe, fill = diff_Africa_Europe > 0)) +
+  geom_col(alpha = 0.8) +
+  geom_hline(yintercept = 0, color = "black") +
+  scale_fill_manual(
+    values = c("TRUE" = "#d95f02", "FALSE" = "#1b9e77"), 
+    labels = c("TRUE" = "Africa Growing Faster", "FALSE" = "Europe Growing Faster"),
+    name = "Growth Advantage"
+  ) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Convergence or Divergence? (Africa Growth - Europe Growth)",
+    subtitle = "Bars show the gap in annual growth rates. Positive bars indicate Africa growing faster than Europe.",
+    x = "Year",
+    y = "Growth Rate Difference (Africa - Europe)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "top"
+  )
+```
+
+We can see that there are distinct periods of convergence and divergence between the two regions. For example, in 2010 and 2011, Africa's growth rate exceeded Europe's, suggesting economic catch-up. However, this "lead" in growth rate is not consistent, as we can see from 2015 to 2021, European growth rate continued to be higher than Africa's with even a increase in magnitude year by year. One potential hypothesis for the reversal is that the 2010 FIFA World Cup hosted in South Africa in 2010 could be a contributing factor to this surge. Also, a point of interest is the drastic decrease in 2009, which coincides with the financial crisis of 2008 in the United States.
+
+It could be useful to explore the fastest growing countries in both regions to get a sense of the top contributors to growth, as well as the countries struggling the most.
+
+### III.3 Fastest Growing Countries Analysis
+
+We will identify and visualize the top 10 fastest growing countries in terms of GDP per capita growth from their first to last available year in the dataset.
+
+```{r}
+# creating table for country growth as a % of gdp
+pct_growth_tbl <- pwt_clean %>%
+  group_by(region, country) %>%
+  summarise(
+    first_year = min(year[!is.na(gdp_per_capita)], na.rm = TRUE),
+    last_year  = max(year[!is.na(gdp_per_capita)], na.rm = TRUE),
+    gdp_pc_first = gdp_per_capita[year == first_year][1],
+    gdp_pc_last  = gdp_per_capita[year == last_year][1],
+    n_years = last_year - first_year, # could use another metric other than absolute % growth, maybe compound annual growth rate, or simply absolute value
+    .groups = "drop"
+  ) %>%
+  filter(is.finite(gdp_pc_first), is.finite(gdp_pc_last), n_years >= 5) %>%
+  mutate(
+    pct_growth = (gdp_pc_last - gdp_pc_first) / gdp_pc_first
+  )
+
+```
+
+To summarize the fastest growing countries, we will create a table that lists the top 10 countries in each region based on their percentage growth in GDP per capita.
+
+```{r}
+# 10 fastest growing countries table
+top_pct_growth <- pct_growth_tbl %>%
+  group_by(region) %>%
+  slice_max(order_by = pct_growth, n = 10, with_ties = FALSE) %>%
+  ungroup()
+```
+
+To visualize the fastest growing countries, we create a bar plot. We include dashed reference lines representing the average growth for each region to serve as a baseline for comparison.
+
+```{r}
+# Calculate regional average growth for reference lines
+region_avg_growth <- pct_growth_tbl %>%
+  group_by(region) %>%
+  summarise(avg_growth = mean(pct_growth), .groups = "drop")
+
+# plot fastest growing countries with reference lines
+ggplot(top_pct_growth, aes(x = reorder(country, pct_growth), y = pct_growth, fill = region)) +
+  geom_col() +
+  geom_text(
+    aes(label = percent(pct_growth, accuracy = 1)),
+    hjust = -0.1, size = 3
+  ) +
+  # Add reference line for regional average
+  geom_hline(data = region_avg_growth, aes(yintercept = avg_growth), linetype = "dashed", color = "black", size = 0.8) +
+  geom_text(
+    data = region_avg_growth, 
+    aes(y = avg_growth, x = 1, label = paste("Avg:", percent(avg_growth, accuracy=1))), 
+    vjust = -0.5, hjust = -0.1, color = "black", size = 3, inherit.aes = FALSE
+  ) +
+  coord_flip() +
+  facet_wrap(~ region, scales = "free_y", ncol = 1) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Countries with the Highest GDP per Capita Growth (2005–2023)",
+    subtitle = "Dashed line represents the regional average growth.",
+    x = NULL,
+    y = "Total % Growth in GDP per Capita"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold")
+  )
+```
+
+### III.4 Regression Analysis
+#### III.4.1 Relationship between Human Capital and GDP Growth
+
+We will also investigate the relationship between human capital and GDP growth.
+
+"Human capital is the economic value of a worker's experience and skills. Human capital is further enhanced by education, training, intelligence, skills, health, and other qualities employers value, such as loyalty and punctuality." [@humancapital]
+
+Human capital is a crucial factor in assessing economic development, thus we will investigate the relationship between human capital and GDP growth in both regions. We use the year 2023 to visualize the relationship between human capital and GDP growth given two regions because it will be the most recent year with complete data, which represents the most recent economic situation. The dashed lines are the global medians for both variables. By dividing the plot into quadrants, we are able to identify the outliers (countries locating above or below the norm).
+
+```{r}
+# Calculate global medians for reference lines
+medians_2023 <- pwt_clean_no_hc %>%
+  filter(year == 2023, !is.na(hc)) %>%
+  summarise(
+    median_hc = median(hc, na.rm = TRUE),
+    median_gdp = median(gdp_per_capita, na.rm = TRUE)
+  )
+
+# Human capital vs GDP for 2023 only with quadrant lines
+pwt_clean_no_hc %>%
+  filter(year == 2023, !is.na(hc)) %>%
+  ggplot(aes(x = hc, y = gdp_per_capita, color = region)) +
+  # Add quadrant lines
+  geom_vline(xintercept = medians_2023$median_hc, linetype = "dashed", color = "gray50") +
+  geom_hline(yintercept = medians_2023$median_gdp, linetype = "dashed", color = "gray50") +
+  # Annotate quadrants
+  annotate("text", x = medians_2023$median_hc, y = max(pwt_clean_no_hc$gdp_per_capita, na.rm=T), label = "High HC / High GDP", hjust = -0.1, vjust = 1, size = 3, color = "gray50") +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_smooth(method = "lm", se = TRUE) +
+  geom_text(aes(label = countrycode), size = 2, hjust = -0.3, vjust = 0) +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  labs(
+    title = "Human Capital vs GDP per Capita (2023)",
+    subtitle = "Dashed lines represent global medians, dividing countries into performance quadrants",
+    x = "Human Capital Index",
+    y = "GDP per Capita"
+  ) +
+  theme_minimal()
+```
+
+```{r, echo=FALSE}
+#hiding this code chunk as not necessary to display.
+
+pwt_clean_no_hc_23 <- pwt_clean_no_hc %>%
+  filter(year == 2023, !is.na(hc), !is.na(gdp_per_capita))
+
+# Split into Africa and Europe
+df_africa <- pwt_clean_no_hc_23 %>% filter(region == "Africa")
+df_europe <- pwt_clean_no_hc_23 %>% filter(region == "Europe")
+
+# Stats for Africa
+cat("=== Africa ===\n")
+cat("Correlation:", cor(df_africa$hc, df_africa$gdp_per_capita), "\n\n")
+model_africa <- lm(gdp_per_capita ~ hc, data = df_africa)
+print(summary(model_africa)$coefficients)
+cat("\nR-squared:", summary(model_africa)$r.squared, "\n")
+
+# Europe stats
+cat("\n=== Europe ===\n")
+cat("Correlation:", cor(df_europe$hc, df_europe$gdp_per_capita), "\n\n")
+model_europe <- lm(gdp_per_capita ~ hc, data = df_europe)
+print(summary(model_europe)$coefficients)
+cat("\nR-squared:", summary(model_europe)$r.squared, "\n")
+
+```
+For African countries we see a much higher correlation (r = 0.662) indicating a moderate to strong relationship between human capital and GDP per capita. The regression coefficient is statistically significant (p<0.01) thus we have a meaninful positive relationship. Human capital appears to be a notable predictor of GDP per capita for African countries in 2023. In fact, 43.8% of variation in GDP per capita can be explained through its relationship to human capital.
+
+European countries see a much weaker relationship and non-statistically significant between human capital and GDP per capita (r=0.213, p>0.01). Only about 4.5% of variation in GDP per capita across European nations can be explained by its relationship to human capital. This implies other factors may contribute much more to economic growth and productivity in Europe.
+
+Beyond the general trends, notable outliers like Ireland (IRL) in Europe and Mauritius (MUS) in Africa significantly outperform their regional peers.
+
+#### III.4.2 Cobb-Douglas Elasticities for Africa and Europe
+In this section, we estimate a Cobb--Douglas production function of the form:
+
+\[
+Y = A K^{\alpha} H^{\beta}
+\]
+
+Taking natural logs yields the linear regression model:
+
+\[
+\ln(Y) = \ln(A) + \alpha \ln(K) + \beta \ln(H)
+\]
+
+Where:
+
+\begin{itemize}
+\item $Y$ = GDP per capita
+\item $K$ = physical capital per capita
+\item $H$ = human capital index
+\item $\alpha$ = elasticity of output with respect to capital
+\item $\beta$ = elasticity of output with respect to human capital
+\end{itemize}
+
+We run separate pooled regressions for African and European countries from \textbf{2005 to 2023}.
+
+```{r}
+# Prepare data for Cobb-Douglas regression
+# Calculate per capita values and take natural logs
+cobb_douglas_data <- pwt_clean_no_hc %>%
+  filter(year == 2023, !is.na(cn), !is.na(hc), !is.na(gdp_per_capita)) %>%
+  mutate(
+    capital_per_capita = cn / pop,  # Physical capital per capita
+    ln_gdp_pc = log(gdp_per_capita),
+    ln_capital_pc = log(capital_per_capita),
+    ln_hc = log(hc)
+  ) %>%
+  filter(is.finite(ln_gdp_pc), is.finite(ln_capital_pc), is.finite(ln_hc))
+
+# Run separate regressions for Africa and Europe
+africa_model <- lm(ln_gdp_pc ~ ln_capital_pc + ln_hc,
+                   data = cobb_douglas_data %>% filter(region == "Africa"))
+
+europe_model <- lm(ln_gdp_pc ~ ln_capital_pc + ln_hc,
+                   data = cobb_douglas_data %>% filter(region == "Europe"))
+
+# Create results table
+results <- data.frame(
+  Region = c("Africa", "Africa", "Europe", "Europe"),
+  Variable = c("Physical Capital (α)", "Human Capital (β)",
+               "Physical Capital (α)", "Human Capital (β)"),
+  Coefficient = c(
+    coef(africa_model)["ln_capital_pc"],
+    coef(africa_model)["ln_hc"],
+    coef(europe_model)["ln_capital_pc"],
+    coef(europe_model)["ln_hc"]
+  ),
+  Std_Error = c(
+    summary(africa_model)$coefficients["ln_capital_pc", "Std. Error"],
+    summary(africa_model)$coefficients["ln_hc", "Std. Error"],
+    summary(europe_model)$coefficients["ln_capital_pc", "Std. Error"],
+    summary(europe_model)$coefficients["ln_hc", "Std. Error"]
+  ),
+  P_Value = c(
+    summary(africa_model)$coefficients["ln_capital_pc", "Pr(>|t|)"],
+    summary(africa_model)$coefficients["ln_hc", "Pr(>|t|)"],
+    summary(europe_model)$coefficients["ln_capital_pc", "Pr(>|t|)"],
+    summary(europe_model)$coefficients["ln_hc", "Pr(>|t|)"]
+  ),
+  R_squared = c(
+    summary(africa_model)$r.squared,
+    summary(africa_model)$r.squared,
+    summary(europe_model)$r.squared,
+    summary(europe_model)$r.squared
+  )
+)
+
+# Add significance stars
+results$Significance <- ifelse(results$P_Value < 0.001, "***",
+                        ifelse(results$P_Value < 0.01, "**",
+                        ifelse(results$P_Value < 0.05, "*", "")))
+
+# Display results table
+cat("\n=== Cobb-Douglas Regression Results ===\n")
+print(results, row.names = FALSE, digits = 4)
+
+# Visualization: Coefficient comparison
+coef_plot_data <- results %>%
+  mutate(
+    CI_lower = Coefficient - 1.96 * Std_Error,
+    CI_upper = Coefficient + 1.96 * Std_Error
+  )
+
+ggplot(coef_plot_data, aes(x = Variable, y = Coefficient, color = Region)) +
+  geom_point(size = 4, position = position_dodge(width = 0.5)) +
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper),
+                width = 0.2, size = 1,
+                position = position_dodge(width = 0.5)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  labs(
+    title = "Cobb-Douglas Elasticities: Africa vs Europe",
+    subtitle = "Coefficient estimates with 95% confidence intervals",
+    x = "Production Input",
+    y = "Elasticity Coefficient",
+    caption = "*** p<0.001, ** p<0.01, * p<0.05"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "top",
+    axis.text.x = element_text(size = 11)
+  ) +
+  scale_color_brewer(palette = "Set1")
+```
+
+## IV. Conclusions and Future Research
+
+We compare economic development in African and European nations (2005-2023) using GDP per capita, population and human capital. We observed Europe to maintain consistently higher GDP per capita, however, Africa experienced a period of fast growth between the years 2005 and 2014, but slowed down considerably after. The gap between the two regions widened following 2014.
+
+Perhaps an expected result, human capital explained economic output considerably more in Africa than in Europe. GDP per capita in Europe is much higher in a majority of nations, even in nations across both regions with comparable human capital. The gap between the two trend lines poses a key question: why would a European country with a given level of human capital (e.g., an index of 2.5) generate three to four times more GDP per capita than an African country with the same score? This disparity suggests that human capital alone does not determine economic performance. Instead, its effectiveness is likely amplified by other contextual factors, such as institutional quality, infrastructure levels, and technological adoption. Further studies could be done to investigate the underlying factors that contribute to the difference in economic performance between two regions.
+
+It could also be useful to further explore the slowing in Africa's growth after 2014. We can explore cases of political instability and conflict, lack of structure and institutions and external events like global financial crises. It may also prove useful to explore more detailed data, accounting for sector-specific growth, infrastructure, institutional quality (corruption), and countries themselves.
+
+## References
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
