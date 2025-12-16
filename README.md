@@ -48,9 +48,9 @@ Several challenges and limitations shape the analysis. Human capital data are mi
 2. **Locate the raw data**: All raw data files are stored in the `data/` directory, including the Penn World Table dataset (`pwt110.xlsx`) and supporting files.
 3. **Run the analysis**: The main analysis is contained in `src/analysis.Rmd`. Open this file in RStudio and knit it to reproduce the results and figures.
 4. **View outputs**: Rendered outputs are available in `src/analysis.html`, with intermediate LaTeX and log files also stored in the `src/` folder.
-5. **Project environment**: The project is configured as an RStudio project (`QTM302W.Rproj`) to ensure consistent paths and reproducibility.
+5. **Project environment**: The project is configured as an RStudio project (`QTM302W_ResearchProject.Rproj`) to ensure consistent paths and reproducibility.
 
 ## Contributing Members
 - Nate Hu
 - Tristan Yang
-- Tomas Hossain-Aguilar
+- Tomas 
